@@ -50,7 +50,21 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
 
       - name: Build debug APK
-        run: gradle -p android assembleDebug lintDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          if gradle -p android assembleDebug lintDebug --no-daemon --stacktrace > android-build.log 2>&1; then
+            cat android-build.log
+          else
+            cat android-build.log
+            node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const log = readFileSync('android-build.log', 'utf8');
+          const start = log.indexOf('FAILURE:');
+          const detail = (start >= 0 ? log.slice(start) : log).slice(0, 12000);
+          console.log('::error title=Android build details::' + detail.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'));
+          NODE
+            exit 1
+          fi
 
       - name: Verify signature and prepare download
         shell: bash
