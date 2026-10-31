@@ -80,3 +80,31 @@ export function lineComponents(board, states) {
   }
   return components;
 }
+
+// Recompute deductions from the player's marks, so removing a line also restores
+// every exclusion that depended on it. Never erase a player-selected line.
+export function excludedEdges(board, clues, states) {
+  const excluded = states.map(state => state === 2);
+  for (const cell of board.cells) {
+    const count = cell.edges.filter(id => states[id] === 1).length;
+    if (count === clues[cell.id]) {
+      for (const id of cell.edges) if (states[id] !== 1) excluded[id] = true;
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const vertex of board.vertices) {
+      const lines = vertex.edges.filter(id => states[id] === 1).length;
+      const available = vertex.edges.filter(id => !excluded[id]);
+      // A contour uses zero or two edges at a vertex. A lone possible edge is
+      // impossible; two chosen lines also rule out the third branch.
+      if (lines >= 2 || (lines === 0 && available.length === 1)) {
+        for (const id of available) if (states[id] !== 1) {
+          excluded[id] = true; changed = true;
+        }
+      }
+    }
+  }
+  return excluded;
+}

@@ -1,8 +1,9 @@
-import { createBoard, generatePuzzle, inspect, lineComponents } from './puzzle.js';
+import { createBoard, generatePuzzle, inspect, lineComponents, excludedEdges } from './puzzle.js';
 const $ = id => document.getElementById(id), board = createBoard(), svg = $('board');
 const NS = 'http://www.w3.org/2000/svg', KEY = 'honeyloop-v1';
 let puzzle, states, history = [], future = [], seconds = 0, moves = 0, won = false, zoom = 1, panX = 0, panY = 0, feedback = false, activeEdge = 0;
-const edgeEls = [], numberEls = [];
+const edgeEls = [], numberEls = [], vertexEls = [];
+let exclusions = [];
 const fragmentPalette = ['#309d80', '#7860bd', '#c9cb36', '#408fc1', '#d49739', '#5144ac', '#5da34d', '#c66a83'];
 let fragmentColors = new Map();
 function updateFragmentColors() {
@@ -26,7 +27,7 @@ function el(tag, attrs, parent = svg) { const node = document.createElementNS(NS
 const baseGroup = el('g', {}), numberGroup = el('g', {}), markGroup = el('g', {}), vertexGroup = el('g', {}), hitGroup = el('g', {});
 for (const e of board.edges) {
   const a=board.vertices[e.a], b=board.vertices[e.b], attrs={x1:a.x,y1:a.y,x2:b.x,y2:b.y};
-  el('line', {...attrs,class:'edge-base'},baseGroup);
+  const base = el('line', {...attrs,class:'edge-base'},baseGroup);
   const outline=el('line',{...attrs,class:'edge-outline',visibility:'hidden'},markGroup);
   const line=el('line',{...attrs,class:'edge-line',visibility:'hidden'},markGroup), x=(a.x+b.x)/2,y=(a.y+b.y)/2;
   const cross=el('path',{d:`M ${x-.09} ${y-.09} l .18 .18 M ${x+.09} ${y-.09} l -.18 .18`,class:'edge-cross',visibility:'hidden'},markGroup);
@@ -36,18 +37,37 @@ for (const e of board.edges) {
   hit.addEventListener('focus',()=>{activeEdge=e.id;});
   hit.addEventListener('keydown',event=>{
     if(['Enter',' ','x','X','ч','Ч'].includes(event.key)){event.preventDefault();if(!won)setEdge(e.id,/x|ч/i.test(event.key)?(states[e.id]===2?0:2):(states[e.id]+1)%3);}
-    if(event.key.startsWith('Arrow')){event.preventDefault(); const delta=['ArrowRight','ArrowDown'].includes(event.key)?1:-1; focusEdge((e.id+delta+board.edges.length)%board.edges.length);}
+    if(event.key.startsWith('Arrow')){event.preventDefault(); const delta=['ArrowRight','ArrowDown'].includes(event.key)?1:-1;let next=e.id;do{next=(next+delta+board.edges.length)%board.edges.length;}while(next!==e.id&&states[next]===0&&exclusions[next]);focusEdge(next);}
   });
-  edgeEls.push({line,outline,cross,hit});
+  edgeEls.push({base,line,outline,cross,hit});
 }
-for(const v of board.vertices) el('circle',{cx:v.x,cy:v.y,r:.039,class:'vertex'},vertexGroup);
+for(const v of board.vertices) vertexEls.push(el('circle',{cx:v.x,cy:v.y,r:.039,class:'vertex'},vertexGroup));
 for(const c of board.cells) numberEls.push(el('text',{x:c.x,y:c.y,class:'cell-number'},numberGroup));
 function focusEdge(id){edgeEls[activeEdge].hit.setAttribute('tabindex','-1');activeEdge=id;const hit=edgeEls[id].hit;hit.setAttribute('tabindex','0');hit.focus(); const e=board.edges[id],a=board.vertices[e.a],b=board.vertices[e.b];panX=(a.x+b.x)/2-(board.bounds.x+board.bounds.w/2);panY=(a.y+b.y)/2-(board.bounds.y+board.bounds.h/2);updateView();}
-function setEdge(id,value){history.push({id,before:states[id],after:value});future=[];states[id]=value;moves++;feedback=false;render();save();}
+function setEdge(id,value){if(states[id]===0&&exclusions[id])return;history.push({id,before:states[id],after:value});future=[];states[id]=value;moves++;feedback=false;render();save();}
 function render(){
-  const result=inspect(board,puzzle.clues,states);won=result.won;
+  exclusions=excludedEdges(board,puzzle.clues,states);
+  const effectiveStates=states.map((state,id)=>exclusions[id]?2:state);
+  const result=inspect(board,puzzle.clues,effectiveStates);won=result.won;
   updateFragmentColors();
-  for(let i=0;i<states.length;i++){const e=edgeEls[i];e.line.setAttribute('visibility',states[i]===1?'visible':'hidden');e.outline.setAttribute('visibility',states[i]===1?'visible':'hidden');e.line.style.stroke=fragmentColors.get(i)||fragmentPalette[0];e.cross.setAttribute('visibility',states[i]===2?'visible':'hidden');e.hit.setAttribute('aria-label',`Ребро ${i+1}: ${['пусто','линия','крестик'][states[i]]}`);}
+  for(let i=0;i<states.length;i++){
+    const e=edgeEls[i], automatic=states[i]===0&&exclusions[i];
+    e.base.setAttribute('visibility',exclusions[i]||states[i]===1?'hidden':'visible');
+    e.line.setAttribute('visibility',states[i]===1?'visible':'hidden');
+    e.outline.setAttribute('visibility',states[i]===1?'visible':'hidden');
+    e.line.style.stroke=fragmentColors.get(i)||fragmentPalette[0];
+    e.cross.setAttribute('visibility',states[i]===2?'visible':'hidden');
+    e.hit.setAttribute('visibility',automatic?'hidden':'visible');
+    e.hit.setAttribute('aria-disabled',String(automatic));
+    e.hit.setAttribute('aria-label',`Ребро ${i+1}: ${automatic?'исключено автоматически':['пусто','линия','крестик'][states[i]]}`);
+  }
+  board.vertices.forEach((v,id)=>vertexEls[id].setAttribute('visibility',v.edges.some(id=>!exclusions[id])?'visible':'hidden'));
+  if(states[activeEdge]===0&&exclusions[activeEdge]){
+    edgeEls[activeEdge].hit.setAttribute('tabindex','-1');
+    const next=states.findIndex((state,id)=>state!==0||!exclusions[id]);
+    if(next>=0)activeEdge=next;
+  }
+  edgeEls[activeEdge].hit.setAttribute('tabindex','0');
   const errors=new Set(result.badCells);
   numberEls.forEach((el,i)=>{el.textContent=puzzle.clues[i];el.setAttribute('class',`cell-number${puzzle.clues[i]===0?' zero':''}${result.counts[i]===puzzle.clues[i]?' satisfied':''}${errors.has(i)?' error':''}`);});
   $('progress-text').textContent=`${result.satisfied} / ${board.cells.length}`;$('progress-bar').style.width=`${100*result.satisfied/board.cells.length}%`;
@@ -75,7 +95,7 @@ document.addEventListener('keydown',e=>{if($('rules').open||$('confirm').open)re
 $('check').onclick=()=>{feedback=true;const r=render();if(r.won)return;if(r.badCells.length||r.badVertices.length)message(`Есть противоречия: ${r.badCells.length} сот, ${r.badVertices.length} вершин. Проверьте линии и крестики.`);else if(r.satisfied===board.cells.length)message('Числа совпали. Теперь соедините линии в один замкнутый контур.');else message(`Явных противоречий нет. Осталось подобрать линии у ${board.cells.length-r.satisfied} сот.`);};
 $('hint').onclick=()=>{
   const wrong=states.findIndex((v,i)=>v!==0&&((v===1)!==Boolean(puzzle.solution[i])));
-  const id=wrong>=0?wrong:states.findIndex(v=>v===0);
+  const id=wrong>=0?wrong:states.findIndex((v,i)=>v===0&&!exclusions[i]);
   if(id<0)return;setEdge(id,puzzle.solution[id]?1:2);focusEdge(id);message('Открыто ребро из одного допустимого решения. Другие решения тоже принимаются.');
 };
 let pending=null;

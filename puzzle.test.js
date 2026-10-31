@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBoard,generatePuzzle,inspect,lineComponents} from './puzzle.js';
+import {createBoard,generatePuzzle,inspect,lineComponents,excludedEdges} from './puzzle.js';
 const board=createBoard();
 test('hexagon has side 12, 397 cells and shared edges / vertices',()=>{
   assert.equal(board.cells.length,397);assert.equal(board.edges.length,1260);assert.equal(board.vertices.length,864);
@@ -42,4 +42,42 @@ test('fragments join and split when a connecting edge changes',()=>{
   assert.equal(lineComponents(board,states).length,1);
   states[bridge]=2;
   assert.equal(lineComponents(board,states).length,2);
+});
+test('zero hides all six edges and propagates through dangling chains',()=>{
+  const clues=board.cells.map(()=>6), states=board.edges.map(()=>0);
+  const cell=board.cells.find(c=>c.q===0&&c.r===0);clues[cell.id]=0;
+  const excluded=excludedEdges(board,clues,states);
+  for(const id of cell.edges){
+    assert.equal(excluded[id],true);
+    for(const v of [board.edges[id].a,board.edges[id].b])for(const next of board.vertices[v].edges)assert.equal(excluded[next],true);
+  }
+  assert.ok(excluded.some(v=>!v),'unrelated grid remains visible');
+});
+test('satisfied clues 1 to 5 hide remaining edges and restore them on undo',()=>{
+  const cell=board.cells.find(c=>c.q===0&&c.r===0);
+  for(let clue=1;clue<=5;clue++){
+    const clues=board.cells.map(()=>6),states=board.edges.map(()=>0);clues[cell.id]=clue;
+    for(const id of cell.edges.slice(0,clue))states[id]=1;
+    const before=[...states],excluded=excludedEdges(board,clues,states);
+    for(const id of cell.edges)assert.equal(excluded[id],states[id]!==1);
+    assert.deepEqual(states,before,'deductions never change user marks');
+    states[cell.edges[clue-1]]=0;
+    const undone=excludedEdges(board,clues,states);
+    assert.ok(cell.edges.some(id=>states[id]===0&&!undone[id]),`clue ${clue}: undone edge candidates restored`);
+  }
+});
+test('vertex with two lines excludes its third branch, without hiding chosen lines',()=>{
+  const vertex=board.vertices.find(v=>v.edges.length===3),states=board.edges.map(()=>0),clues=board.cells.map(()=>6);
+  states[vertex.edges[0]]=states[vertex.edges[1]]=1;
+  const excluded=excludedEdges(board,clues,states);
+  assert.equal(excluded[vertex.edges[2]],true);
+  assert.equal(excluded[vertex.edges[0]],false);assert.equal(excluded[vertex.edges[1]],false);
+});
+test('deductions from valid partial solutions never remove a solution line',()=>{
+  for(let seed=0;seed<15;seed++){
+    const p=generatePuzzle(board,seed);
+    const states=p.solution.map((line,id)=>id%4===0?(line?1:2):0);
+    const excluded=excludedEdges(board,p.clues,states);
+    for(let id=0;id<states.length;id++)if(p.solution[id])assert.equal(excluded[id],false,`seed ${seed}, edge ${id}`);
+  }
 });
