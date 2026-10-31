@@ -1,4 +1,4 @@
 {
   "name": "honeyloop", "version": "1.0.0", "private": true, "type": "module",
-  "scripts": { "dev": "node server.mjs", "start": "node server.mjs", "test": "node --test", "build": "node build.mjs" }
+  "scripts": { "dev": "node server.mjs", "start": "node server.mjs", "test": "node --test", "build": "node build.mjs", "android:prepare": "node scripts/prepare-android.mjs" }
 }
