@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBoard,generatePuzzle,inspect} from './puzzle.js';
+import {createBoard,generatePuzzle,inspect,lineComponents} from './puzzle.js';
 const board=createBoard();
 test('hexagon has side 12, 397 cells and shared edges / vertices',()=>{
   assert.equal(board.cells.length,397);assert.equal(board.edges.length,1260);assert.equal(board.vertices.length,864);
@@ -31,4 +31,15 @@ test('two separate loops cannot win even when every clue matches',()=>{
   const clues=board.cells.map(c=>c.edges.reduce((sum,id)=>sum+state[id],0));
   const result=inspect(board,clues,state);
   assert.equal(result.satisfied,397);assert.equal(result.loop,false);assert.equal(result.won,false);
+});
+test('fragments join and split when a connecting edge changes',()=>{
+  const states=Array(board.edges.length).fill(0);
+  const [a,bridge,b]=board.cells.find(c=>c.q===0&&c.r===0).edges;
+  states[a]=states[b]=1;
+  assert.equal(lineComponents(board,states).length,2);
+  states[bridge]=1;
+  assert.deepEqual(new Set(lineComponents(board,states)[0]),new Set([a,bridge,b]));
+  assert.equal(lineComponents(board,states).length,1);
+  states[bridge]=2;
+  assert.equal(lineComponents(board,states).length,2);
 });

@@ -1,13 +1,33 @@
-import { createBoard, generatePuzzle, inspect } from './puzzle.js';
+import { createBoard, generatePuzzle, inspect, lineComponents } from './puzzle.js';
 const $ = id => document.getElementById(id), board = createBoard(), svg = $('board');
 const NS = 'http://www.w3.org/2000/svg', KEY = 'honeyloop-v1';
 let puzzle, states, history = [], future = [], seconds = 0, moves = 0, won = false, zoom = 1, panX = 0, panY = 0, feedback = false, activeEdge = 0;
 const edgeEls = [], numberEls = [];
+const fragmentPalette = ['#309d80', '#7860bd', '#c9cb36', '#408fc1', '#d49739', '#5144ac', '#5da34d', '#c66a83'];
+let fragmentColors = new Map();
+function updateFragmentColors() {
+  const next = new Map(), used = new Set();
+  // Retain the dominant color when fragments join; give split fragments distinct colors.
+  const components = lineComponents(board, states).sort((a,b) => b.length-a.length);
+  for (const ids of components) {
+    const votes = new Map();
+    for (const id of ids) {
+      const color = fragmentColors.get(id);
+      if (color) votes.set(color, (votes.get(color) || 0) + 1);
+    }
+    const preferred = [...votes].sort((a,b) => b[1]-a[1]).find(([color]) => !used.has(color));
+    const color = preferred?.[0] || fragmentPalette.find(color => !used.has(color)) || fragmentPalette[used.size % fragmentPalette.length];
+    used.add(color);
+    for (const id of ids) next.set(id, color);
+  }
+  fragmentColors = next;
+}
 function el(tag, attrs, parent = svg) { const node = document.createElementNS(NS, tag); for(const [k,v] of Object.entries(attrs)) node.setAttribute(k,v); parent.append(node); return node; }
 const baseGroup = el('g', {}), numberGroup = el('g', {}), markGroup = el('g', {}), vertexGroup = el('g', {}), hitGroup = el('g', {});
 for (const e of board.edges) {
   const a=board.vertices[e.a], b=board.vertices[e.b], attrs={x1:a.x,y1:a.y,x2:b.x,y2:b.y};
   el('line', {...attrs,class:'edge-base'},baseGroup);
+  const outline=el('line',{...attrs,class:'edge-outline',visibility:'hidden'},markGroup);
   const line=el('line',{...attrs,class:'edge-line',visibility:'hidden'},markGroup), x=(a.x+b.x)/2,y=(a.y+b.y)/2;
   const cross=el('path',{d:`M ${x-.09} ${y-.09} l .18 .18 M ${x+.09} ${y-.09} l -.18 .18`,class:'edge-cross',visibility:'hidden'},markGroup);
   const hit=el('line',{...attrs,class:'edge-hit','data-edge':e.id,tabindex:e.id===0?'0':'-1',role:'button'},hitGroup);
@@ -18,7 +38,7 @@ for (const e of board.edges) {
     if(['Enter',' ','x','X','ч','Ч'].includes(event.key)){event.preventDefault();if(!won)setEdge(e.id,/x|ч/i.test(event.key)?(states[e.id]===2?0:2):(states[e.id]+1)%3);}
     if(event.key.startsWith('Arrow')){event.preventDefault(); const delta=['ArrowRight','ArrowDown'].includes(event.key)?1:-1; focusEdge((e.id+delta+board.edges.length)%board.edges.length);}
   });
-  edgeEls.push({line,cross,hit});
+  edgeEls.push({line,outline,cross,hit});
 }
 for(const v of board.vertices) el('circle',{cx:v.x,cy:v.y,r:.039,class:'vertex'},vertexGroup);
 for(const c of board.cells) numberEls.push(el('text',{x:c.x,y:c.y,class:'cell-number'},numberGroup));
@@ -26,8 +46,9 @@ function focusEdge(id){edgeEls[activeEdge].hit.setAttribute('tabindex','-1');act
 function setEdge(id,value){history.push({id,before:states[id],after:value});future=[];states[id]=value;moves++;feedback=false;render();save();}
 function render(){
   const result=inspect(board,puzzle.clues,states);won=result.won;
-  for(let i=0;i<states.length;i++){const e=edgeEls[i];e.line.setAttribute('visibility',states[i]===1?'visible':'hidden');e.cross.setAttribute('visibility',states[i]===2?'visible':'hidden');e.hit.setAttribute('aria-label',`Ребро ${i+1}: ${['пусто','линия','крестик'][states[i]]}`);}
-  const errors=new Set(feedback?result.badCells:[]);
+  updateFragmentColors();
+  for(let i=0;i<states.length;i++){const e=edgeEls[i];e.line.setAttribute('visibility',states[i]===1?'visible':'hidden');e.outline.setAttribute('visibility',states[i]===1?'visible':'hidden');e.line.style.stroke=fragmentColors.get(i)||fragmentPalette[0];e.cross.setAttribute('visibility',states[i]===2?'visible':'hidden');e.hit.setAttribute('aria-label',`Ребро ${i+1}: ${['пусто','линия','крестик'][states[i]]}`);}
+  const errors=new Set(result.badCells);
   numberEls.forEach((el,i)=>{el.textContent=puzzle.clues[i];el.setAttribute('class',`cell-number${puzzle.clues[i]===0?' zero':''}${result.counts[i]===puzzle.clues[i]?' satisfied':''}${errors.has(i)?' error':''}`);});
   $('progress-text').textContent=`${result.satisfied} / ${board.cells.length}`;$('progress-bar').style.width=`${100*result.satisfied/board.cells.length}%`;
   $('line-count').textContent=result.lines;$('move-count').textContent=moves;$('undo').disabled=!history.length;$('redo').disabled=!future.length;
@@ -39,7 +60,7 @@ function message(text){$('status').textContent=text;}
 function save(){try{localStorage.setItem(KEY,JSON.stringify({seed:puzzle.seed,states,history,future,seconds,moves}));}catch{$('save-status').textContent='Сохранение недоступно в этом браузере';}}
 function validEntry(e){return e&&Number.isInteger(e.id)&&e.id>=0&&e.id<board.edges.length&&[0,1,2].includes(e.before)&&[0,1,2].includes(e.after);}
 function start(seed=crypto.getRandomValues(new Uint32Array(1))[0], saved=null){
-  puzzle=generatePuzzle(board,seed);states=saved?.states||Array(board.edges.length).fill(0);history=saved?.history||[];future=saved?.future||[];seconds=saved?.seconds||0;moves=saved?.moves||0;won=false;feedback=false;zoom=1;panX=panY=0;
+  puzzle=generatePuzzle(board,seed);states=saved?.states||Array(board.edges.length).fill(0);history=saved?.history||[];future=saved?.future||[];seconds=saved?.seconds||0;moves=saved?.moves||0;won=false;feedback=false;fragmentColors=new Map();zoom=1;panX=panY=0;
   $('board-label').textContent=`ГОЛОВОЛОМКА #${seed.toString(16).slice(-6).toUpperCase()}`;message(saved?'Прогресс восстановлен. Продолжайте свой контур.':'Начните с нулей: вокруг них нет линий.');updateView();render();$('timer').textContent=formatTime(seconds);save();
 }
 let saved=null;try{const raw=JSON.parse(localStorage.getItem(KEY));if(raw&&Number.isInteger(raw.seed)&&Array.isArray(raw.states)&&raw.states.length===board.edges.length&&raw.states.every(v=>[0,1,2].includes(v))&&Array.isArray(raw.history)&&raw.history.every(validEntry)&&Array.isArray(raw.future)&&raw.future.every(validEntry)&&Number.isFinite(raw.seconds)&&raw.seconds>=0&&Number.isFinite(raw.moves)&&raw.moves>=0)saved=raw;}catch{}

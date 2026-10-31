@@ -60,3 +60,23 @@ export function inspect(board, clues, states) {
   }
   return { counts, satisfied, badCells, badVertices, lines: lines.length, loop, won: satisfied === clues.length && loop };
 }
+
+// Edges belong to the same fragment when they meet at a vertex.
+export function lineComponents(board, states) {
+  const seen = new Set(), components = [];
+  for (const edge of board.edges) {
+    if (states[edge.id] !== 1 || seen.has(edge.id)) continue;
+    const component = [], pending = [edge.id];
+    while (pending.length) {
+      const id = pending.pop();
+      if (seen.has(id)) continue;
+      seen.add(id); component.push(id);
+      const e = board.edges[id];
+      for (const v of [e.a, e.b]) for (const next of board.vertices[v].edges) {
+        if (states[next] === 1 && !seen.has(next)) pending.push(next);
+      }
+    }
+    components.push(component);
+  }
+  return components;
+}
