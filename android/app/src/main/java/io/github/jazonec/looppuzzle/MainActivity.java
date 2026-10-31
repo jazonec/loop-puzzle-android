@@ -76,6 +76,11 @@ public final class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if ("https".equals(uri.getScheme()) && ORIGIN.equals(uri.getHost())
+                    && "/assets/www/".equals(uri.getPath())) {
+                    view.loadUrl(START_URL);
+                    return true;
+                }
                 return !("https".equals(uri.getScheme()) && ORIGIN.equals(uri.getHost())
                     && uri.getPath() != null && uri.getPath().startsWith("/assets/www/"));
             }
